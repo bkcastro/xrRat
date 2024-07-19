@@ -1,63 +1,264 @@
+
 import * as THREE from 'three';
-import { TransformControls } from 'three/addons/controls/TransformControls.js';
+
+import { BoxLineGeometry } from 'three/addons/geometries/BoxLineGeometry.js';
 import { XRButton } from 'three/addons/webxr/XRButton.js';
 import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
-import { OrbitControls } from 'three/examples/jsm/Addons.js';
-import Stats from 'three/examples/jsm/libs/stats.module.js';
-import SpellCaster from './xr/SpellCaster';
-import SpellCasterUI from './xr/SpellCasterUI';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-let container;
-let camera, scene, renderer, clock, orbitControls;
-let mouse, controller1, controller2, line;
+let camera, scene, renderer;
+let controller1, controller2;
 let controllerGrip1, controllerGrip2;
 
-let raycaster;
+// Physics
+let world, RAPIER;
 
-let controls, group;
+let rigidBodies = [];
+let objects = [];
 
-let spellCaster, spellCasterUI;
+let room, spheres, physics;
+const velocity = new THREE.Vector3();
 
-// debug 
+let count = 0;
 
-let stats;
+// Rat stuff 
 
-init();
+let wheel, stickOne, stickTwo, stickThree;
+
+// functions don't need to return anything just keep stuff within scope of operations. 
+
+function animateRatWheel() {
+  if (wheel) {
+    wheel.rotation.x += 0.021;
+  }
+}
+
+function addRatWheel() {
+  const loader = new GLTFLoader();
+
+  loader.load('./ratWheel.glb', (gltf) => {
+    const ratWheel = gltf.scene;
+
+    // Traverse the scene to get names and possibly apply custom methods
+    ratWheel.traverse((object) => {
+      if (object.isMesh) { // Check if the object is a mesh
+        //console.log('Mesh Name:', object.name); // Log the name of the mesh
+
+        // Example of applying a custom method
+        if (object.name === 'wheel') {
+          // Apply custom method or manipulation
+          object.material.opacity = 0.5;
+          object.material.transparent = true;
+          object.material.wireframe = true;
+
+          wheel = object;
+        }
+      }
+    });
+
+    scene.add(ratWheel);
+  }, undefined, function (error) {
+    console.error('An error happened during the loading process:', error);
+  });
+}
+
+function rat() {
+  const loader = new GLTFLoader();
+
+  loader.load('./rat.glb', (gltf) => {
+    const rat = gltf.scene;
+    rat.scale.multiplyScalar(2);
+    rat.rotateY(Math.PI / 2)
+    rat.position.set(0, 1.2, 0);
+    scene.add(rat);
+
+    addRatWheel();
+
+    // Check if there are animations
+    if (gltf.animations && gltf.animations.length) {
+      // Create an AnimationMixer to play the animations
+      const mixer = new THREE.AnimationMixer(rat);
+
+      // Play all animations
+      gltf.animations.forEach((clip) => {
+        const action = mixer.clipAction(clip);
+        action.play();
+      });
+
+      // Update the mixer on each frame
+      const clock = new THREE.Clock();
+      function animate() {
+        requestAnimationFrame(animate);
+
+        const delta = clock.getDelta(); // Clock is needed to find the delta time
+        mixer.update(delta); // Update the animation frames
+
+        renderer.render(scene, camera); // Re-render the scene
+      }
+
+      animate(); // Start the animation loop
+    }
+  }, undefined, function (error) {
+    console.error('An error happened during the loading process:', error);
+  });
+}
+function spawnBall() {
+
+  if (objects.length > 300) return;
+
+  const ballGeometry = new THREE.SphereGeometry(.5, 32, 32);
+  const ballMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+  const ballMesh = new THREE.Mesh(ballGeometry, ballMaterial);
+  const x = Math.random() * 10 - 5;
+  const z = Math.random() * 10 - 5;
+  const y = 3;
+
+  ballMesh.position.set(x, y, z);
+  scene.add(ballMesh);
+
+  // Add physics
+  const ballBody = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(x, y, z));
+  world.createCollider(RAPIER.ColliderDesc.ball(1), ballBody);
+
+  rigidBodies.push(ballBody);
+  objects.push(ballMesh);
+}
+
+function makeBoardRandom() {
+  const groundGeometry = new THREE.PlaneGeometry(20, 20);
+  const groundMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00, wireframe: true });
+  const groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
+  groundMesh.rotation.x = -Math.PI / 2;
+  groundMesh.position.set(0, 0, 0);
+  scene.add(groundMesh);
+
+  // Add physics for the ground
+  const groundBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
+  world.createCollider(RAPIER.ColliderDesc.cuboid(10, 0.1, 10), groundBody);
+
+  // Positions and colors for walls
+  const positions = [];
+  for (let i = 0; i < 11; i++) {
+    positions.push({ x: Math.random() * 15 - 7.5, y: .2, z: Math.random() * 15 - 7.5 });
+  }
+
+  const colors = [0xff0000, 0x00ff00, 0x0000ff]; // Red, Green, Blue
+
+  positions.forEach((pos, index) => {
+    // Randomly adjust angles
+    const angleY = Math.random() * Math.PI; // Random angle between 0 and π
+    const angleX = Math.random() * Math.PI; // Random angle between 0 and π
+    const angleZ = Math.random() * Math.PI; // Random angle between 0 and π
+
+    // Wall dimensions
+    const wallThickness = 0.2;
+    const wallHeight = 3;
+    const wallLength = 20 + 2 * wallThickness;
+
+    // Create wall geometry and material
+    const wallGeometry = new THREE.BoxGeometry(wallLength, wallHeight, wallThickness);
+    const wallMaterial = new THREE.MeshBasicMaterial({ color: colors[index % colors.length], wireframe: true });
+    const wallMesh = new THREE.Mesh(wallGeometry, wallMaterial);
+
+    // Set wall position and rotation
+    wallMesh.position.set(pos.x, pos.y, pos.z);
+    wallMesh.rotation.set(angleX, angleY, angleZ);
+
+    // Add to scene
+    scene.add(wallMesh);
+
+    // Create a THREE.Quaternion for the wall rotation
+    const quaternion = new THREE.Quaternion();
+    quaternion.setFromEuler(new THREE.Euler(angleX, angleY, angleZ, 'XYZ'));
+
+    // Add physics for walls
+    const wallBodyDesc = RAPIER.RigidBodyDesc.fixed()
+      .setTranslation(pos.x, pos.y, pos.z)
+      .setRotation({ x: quaternion.x, y: quaternion.y, z: quaternion.z, w: quaternion.w });
+    const wallBody = world.createRigidBody(wallBodyDesc);
+    world.createCollider(RAPIER.ColliderDesc.cuboid(wallLength / 2, wallHeight / 2, wallThickness / 2), wallBody);
+  });
+}
+
+
+function makeBoard() {
+  const groundGeometry = new THREE.PlaneGeometry(20, 20);  // Increased size for better area coverage
+  const groundMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+  const groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
+  groundMesh.rotation.x = -Math.PI / 2;
+  groundMesh.position.set(0, 0, 0);  // Centered at origin for easier boundary calculations
+  scene.add(groundMesh);
+
+  // Add physics for the ground
+  const groundBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
+  world.createCollider(RAPIER.ColliderDesc.cuboid(10, 0.1, 10), groundBody);
+
+  // Create walls
+  const wallMaterial = new THREE.MeshBasicMaterial({ color: 0x888888 });
+  const wallThickness = 0.2;
+  const wallHeight = 3;
+  const positions = [
+    { x: 0, y: 1.5, z: 10 }, // North wall
+    { x: 0, y: 1.5, z: -10 }, // South wall
+    { x: 10, y: 1.5, z: 10 },  // East wall
+    { x: -5, y: 1.5, z: 5 }  // West wall
+  ];
+  const sizes = [
+    { x: 20 + 2 * wallThickness, y: wallHeight, z: wallThickness }, // North and South walls
+    { x: wallThickness, y: wallHeight, z: 20 + 2 * wallThickness }  // East and West walls
+  ];
+
+  positions.forEach((pos, index) => {
+    const wallGeometry = new THREE.BoxGeometry(sizes[index % 2].x, sizes[index % 2].y, sizes[index % 2].z);
+    const wallMesh = new THREE.Mesh(wallGeometry, wallMaterial);
+    wallMesh.position.set(pos.x, pos.y, pos.z);
+    scene.add(wallMesh);
+
+    // Add physics for walls
+    const wallBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
+    world.createCollider(RAPIER.ColliderDesc.cuboid(sizes[index % 2].x / 2, sizes[index % 2].y / 2, sizes[index % 2].z / 2), wallBody, new RAPIER.Vector3(pos.x, pos.y, pos.z));
+  });
+}
+
+import('@dimforge/rapier3d').then(rapeirModel => {
+
+  init();
+
+  rat();
+  // Use the RAPIER module here.
+  let gravity = { x: 0.0, y: -9.81, z: 0.0 };
+  RAPIER = rapeirModel;
+  world = new RAPIER.World(gravity);
+
+  console.log("world", world);
+
+  makeBoardRandom();
+  // Spawn a ball every second
+  setInterval(spawnBall, 1000);
+
+})
+
 
 function init() {
 
-  stats = new Stats();
-  stats.showPanel(0);
-  document.body.appendChild(stats.dom);
-
-  container = document.createElement('div');
-  document.body.appendChild(container);
-
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(Math.random(), Math.random(), Math.random());
-  // scene.add(new THREE.AxesHelper(1));
+  scene.background = new THREE.Color(0x505050);
 
-  camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.01, 1000);
-  camera.position.set(0, 3, 3);
-  camera.lookAt(new THREE.Vector3(0, 0, 0));
+  camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 50);
+  camera.position.set(0, 15, 25);
 
-  const floorGeometry = new THREE.PlaneGeometry(6, 6);
-  const floorMaterial = new THREE.ShadowMaterial({ opacity: 0.25, blending: THREE.CustomBlending, transparent: false });
-  const floor = new THREE.Mesh(floorGeometry, floorMaterial);
-  floor.rotation.x = - Math.PI / 2;
-  floor.receiveShadow = true;
-  // scene.add(floor);
+  room = new THREE.LineSegments(
+    new BoxLineGeometry(6, 6, 6, 10, 10, 10),
+    new THREE.LineBasicMaterial({ color: 0x808080 })
+  );
+  room.geometry.translate(0, 3, 0);
+  scene.add(room);
 
-  scene.add(new THREE.HemisphereLight(0xbcbcbc, 0xa5a5a5, 3));
+  scene.add(new THREE.HemisphereLight(0xbbbbbb, 0x888888, 3));
 
   const light = new THREE.DirectionalLight(0xffffff, 3);
-  light.position.set(0, 6, 0);
-  light.castShadow = true;
-  light.shadow.camera.top = 3;
-  light.shadow.camera.bottom = - 3;
-  light.shadow.camera.right = 3;
-  light.shadow.camera.left = - 3;
-  light.shadow.mapSize.set(4096, 4096);
+  light.position.set(1, 1, 1).normalize();
   scene.add(light);
 
   //
@@ -66,41 +267,69 @@ function init() {
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setAnimationLoop(animate);
-  renderer.shadowMap.enabled = true;
   renderer.xr.enabled = true;
-  renderer.xr.setFoveation(0.0);
-  container.appendChild(renderer.domElement);
+  document.body.appendChild(renderer.domElement);
 
-  document.body.appendChild(XRButton.createButton(renderer));
+  //
+
+  const controls = new OrbitControls(camera, renderer.domElement);
+
+  controls.target.y = 1.6;
+  controls.update();
+
+  document.body.appendChild(XRButton.createButton(renderer, {
+    'optionalFeatures': ['depth-sensing'],
+    'depthSensing': { 'usagePreference': ['gpu-optimized'], 'dataFormatPreference': [] }
+  }));
 
   // controllers
 
-  orbitControls = new OrbitControls(camera, renderer.domElement);
+  function onSelectStart() {
 
-  mouse = new THREE.Vector2();
+    this.userData.isSelecting = true;
 
-  window.addEventListener("mousemove", (event) => {
-    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-  });
+  }
 
-  window.addEventListener("click", onSelect);
+  function onSelectEnd() {
+
+    this.userData.isSelecting = false;
+
+  }
 
   controller1 = renderer.xr.getController(0);
-  controller1.addEventListener('select', onSelect);
-  controller1.addEventListener('selectstart', onControllerEvent);
-  controller1.addEventListener('selectend', onControllerEvent);
-  controller1.addEventListener('move', onControllerEvent);
-  controller1.userData.active = false;
+  controller1.addEventListener('selectstart', onSelectStart);
+  controller1.addEventListener('selectend', onSelectEnd);
+  controller1.addEventListener('connected', function (event) {
+
+    this.add(buildController(event.data));
+
+  });
+  controller1.addEventListener('disconnected', function () {
+
+    this.remove(this.children[0]);
+
+  });
   scene.add(controller1);
 
   controller2 = renderer.xr.getController(1);
-  controller2.addEventListener('select', onSelect);
-  controller2.addEventListener('selectstart', onControllerEvent);
-  controller2.addEventListener('selectend', onControllerEvent);
-  controller2.addEventListener('move', onControllerEvent);
-  controller2.userData.active = true;
+  controller2.addEventListener('selectstart', onSelectStart);
+  controller2.addEventListener('selectend', onSelectEnd);
+  controller2.addEventListener('connected', function (event) {
+
+    this.add(buildController(event.data));
+
+  });
+  controller2.addEventListener('disconnected', function () {
+
+    this.remove(this.children[0]);
+
+  });
   scene.add(controller2);
+
+  // The XRControllerModelFactory will automatically fetch controller models
+  // that match what the user is holding as closely as possible. The models
+  // should be attached to the object returned from getControllerGrip in
+  // order to match the orientation of the held device.
 
   const controllerModelFactory = new XRControllerModelFactory();
 
@@ -114,125 +343,31 @@ function init() {
 
   //
 
-  const geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, - 1)]);
-
-  line = new THREE.Line(geometry);
-  line.name = 'line';
-  line.scale.z = 1;
-
-  raycaster = new THREE.Raycaster();
-
-  // controls
-
-  controls = new TransformControls(camera, renderer.domElement);
-  scene.add(controls);
-
-  //
-
-  // Lets add some spells
-  spellCaster = new SpellCaster();
-  spellCaster.scale.multiplyScalar(1 / 2);
-  spellCaster.position.set(.5, 1.25, -1);
-  //spellCaster.castAll();
-  scene.add(spellCaster);
-
-  spellCasterUI = new SpellCasterUI(spellCaster);
-  spellCasterUI.scale.multiplyScalar(1 / 2);
-  spellCasterUI.position.set(-0.2, 1.05, -0.25);
-  scene.add(spellCasterUI);
-
   window.addEventListener('resize', onWindowResize);
 
-  clock = new THREE.Clock();
 }
 
-function onSelect(event) {
+function buildController(data) {
 
-  const controller = event.target;
+  let geometry, material;
 
-  controller1.userData.active = false;
-  controller2.userData.active = false;
+  switch (data.targetRayMode) {
 
-  if (controller === controller1) {
+    case 'tracked-pointer':
 
-    controller1.userData.active = true;
-    controller1.add(line);
+      geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, - 1], 3));
+      geometry.setAttribute('color', new THREE.Float32BufferAttribute([0.5, 0.5, 0.5, 0, 0, 0], 3));
 
-  }
+      material = new THREE.LineBasicMaterial({ vertexColors: true, blending: THREE.AdditiveBlending });
 
-  if (controller === controller2) {
+      return new THREE.Line(geometry, material);
 
-    controller2.userData.active = true;
-    controller2.add(line);
+    case 'gaze':
 
-  }
-
-  // This means that the input came from the 2D canvas 
-  if (controller instanceof HTMLCanvasElement) {
-    raycaster.setFromCamera(mouse, camera);
-  } else {
-    raycaster.setFromXRController(controller);
-  }
-
-  const temp = [spellCasterUI];
-
-  if (spellCaster.spell) {
-    temp.push(spellCaster.spell.bb)
-  } else {
-    console.log("hi")
-    temp.push(spellCaster.cross);
-  }
-
-  const intersects = raycaster.intersectObjects(temp);
-
-  if (intersects.length > 0) {
-
-    // Check what type of item got intersected 
-    const object = intersects[0].object;
-    console.log(object);
-    switch (object.userData.type) {
-      case 'ui_handle':
-        controls.attach(object);
-        break;
-      case 'ui_image':
-        console.log("trigger some action which is associated with the object");
-        object.userData.action();
-        controls.detach();
-        break;
-      case 'spell_bb':
-        controls.attach(object);
-        break;
-
-    }
-
-  } else {
-    controls.detach();
-  }
-
-}
-
-function onControllerEvent(event) {
-
-  const controller = event.target;
-
-  if (controller.userData.active === false) return;
-
-  controls.getRaycaster().setFromXRController(controller);
-
-  switch (event.type) {
-
-    case 'selectstart':
-      controls.pointerDown(null);
-      break;
-
-    case 'selectend':
-      controls.pointerUp(null);
-      break;
-
-    case 'move':
-      controls.pointerHover(null);
-      controls.pointerMove(null);
-      break;
+      geometry = new THREE.RingGeometry(0.02, 0.04, 32).translate(0, 0, - 1);
+      material = new THREE.MeshBasicMaterial({ opacity: 0.5, transparent: true });
+      return new THREE.Mesh(geometry, material);
 
   }
 
@@ -247,15 +382,53 @@ function onWindowResize() {
 
 }
 
+function handleController(controller) {
+
+  if (controller.userData.isSelecting) {
+
+    physics.setMeshPosition(spheres, controller.position, count);
+
+    velocity.x = (Math.random() - 0.5) * 2;
+    velocity.y = (Math.random() - 0.5) * 2;
+    velocity.z = (Math.random() - 9);
+    velocity.applyQuaternion(controller.quaternion);
+
+    physics.setMeshVelocity(spheres, velocity, count);
+
+    if (++count === spheres.count) count = 0;
+
+  }
+
+}
+
 function animate() {
-  stats.begin();
 
-  const elapsed = clock.getElapsedTime();
+  handleController(controller1);
+  handleController(controller2);
 
-  spellCasterUI.update();
-  spellCaster.update(elapsed);
+  updatePhysics();
+  animateRatWheel();
 
   renderer.render(scene, camera);
 
-  stats.end();
+}
+
+function updatePhysics() {
+  if (world) {
+    world.step()
+
+    for (let i = 0; i < rigidBodies.length; i++) {
+
+      const rigidBody = rigidBodies[i];
+      const mesh = objects[i];
+
+      if (rigidBody.bodyType() == 0) {
+
+        let position = rigidBody.translation();
+
+        mesh.position.copy(position);
+
+      }
+    }
+  }
 }

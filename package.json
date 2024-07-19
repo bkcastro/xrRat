@@ -12,9 +12,11 @@
     "vite": "^5.3.3"
   },
   "dependencies": {
+    "@dimforge/rapier3d": "^0.13.1",
     "@pmndrs/uikit": "^0.3.11",
     "lil-gui": "^0.19.2",
     "three": "^0.166.1",
-    "three-mesh-ui": "^6.5.4"
+    "three-mesh-ui": "^6.5.4",
+    "vite-plugin-wasm": "^3.3.0"
   }
 }
