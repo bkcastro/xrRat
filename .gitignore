@@ -1,3 +1,11 @@
+# Ignore private keys
+*.pem
+
+# Ignore specific OpenSSL generated files if named conventionally
+key.pem
+cert.pem
+csr.pem
+
 # Logs
 logs
 *.log
