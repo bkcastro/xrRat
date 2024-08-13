@@ -181,46 +181,6 @@ function makeBoardRandom() {
   });
 }
 
-
-function makeBoard() {
-  const groundGeometry = new THREE.PlaneGeometry(20, 20);  // Increased size for better area coverage
-  const groundMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00 });
-  const groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
-  groundMesh.rotation.x = -Math.PI / 2;
-  groundMesh.position.set(0, 0, 0);  // Centered at origin for easier boundary calculations
-  scene.add(groundMesh);
-
-  // Add physics for the ground
-  const groundBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
-  world.createCollider(RAPIER.ColliderDesc.cuboid(10, 0.1, 10), groundBody);
-
-  // Create walls
-  const wallMaterial = new THREE.MeshBasicMaterial({ color: 0x888888 });
-  const wallThickness = 0.2;
-  const wallHeight = 3;
-  const positions = [
-    { x: 0, y: 1.5, z: 10 }, // North wall
-    { x: 0, y: 1.5, z: -10 }, // South wall
-    { x: 10, y: 1.5, z: 10 },  // East wall
-    { x: -5, y: 1.5, z: 5 }  // West wall
-  ];
-  const sizes = [
-    { x: 20 + 2 * wallThickness, y: wallHeight, z: wallThickness }, // North and South walls
-    { x: wallThickness, y: wallHeight, z: 20 + 2 * wallThickness }  // East and West walls
-  ];
-
-  positions.forEach((pos, index) => {
-    const wallGeometry = new THREE.BoxGeometry(sizes[index % 2].x, sizes[index % 2].y, sizes[index % 2].z);
-    const wallMesh = new THREE.Mesh(wallGeometry, wallMaterial);
-    wallMesh.position.set(pos.x, pos.y, pos.z);
-    scene.add(wallMesh);
-
-    // Add physics for walls
-    const wallBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
-    world.createCollider(RAPIER.ColliderDesc.cuboid(sizes[index % 2].x / 2, sizes[index % 2].y / 2, sizes[index % 2].z / 2), wallBody, new RAPIER.Vector3(pos.x, pos.y, pos.z));
-  });
-}
-
 import('@dimforge/rapier3d').then(rapeirModel => {
 
   init();
@@ -230,6 +190,7 @@ import('@dimforge/rapier3d').then(rapeirModel => {
   let gravity = { x: 0.0, y: -9.81, z: 0.0 };
   RAPIER = rapeirModel;
   world = new RAPIER.World(gravity);
+  const integrationParameters = new RAPIER.IntegrationParameters();
 
   console.log("world", world);
 
