@@ -7,9 +7,10 @@ import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFa
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-let camera, scene, renderer;
+let camera, scene, renderer, clock;
 let controller1, controller2;
 let controllerGrip1, controllerGrip2;
+let interval; // stores the id of the set interval which spawns the balls 
 
 // Physics
 let world, RAPIER;
@@ -24,13 +25,40 @@ let count = 0;
 
 // Rat stuff 
 
-let wheel, stickOne, stickTwo, stickThree;
+let wheel, rim_1, rim_2, rim_3; 
 
 // functions don't need to return anything just keep stuff within scope of operations. 
 
-function animateRatWheel() {
+let cameraPositions = [
+  [2, 1, 2, 0],
+  [3, 5, 3, 0],
+  [1.1, 1, 1.1, 1],
+  [0, 5, 0, 0], 
+  [10, 8, 10, 0],   
+]
+
+let cameraPosition = cameraPositions[Math.floor(Math.random() * cameraPositions.length)]
+
+function animateRatWheel(elapsedTime) {
   if (wheel) {
     wheel.rotation.x += 0.021;
+    rim_1.rotation.x += 0.021;
+    rim_2.rotation.x -= 0.021;
+    rim_3.rotation.x += 0.01;
+
+    if (!cameraPosition[3]) {
+      camera.position.x = Math.sin(elapsedTime / 10) * cameraPosition[0]
+      camera.position.y = cameraPosition[1]
+      camera.position.z = Math.cos(elapsedTime / 10) * cameraPosition[2]
+    } else {
+      camera.position.x = cameraPosition[0]
+      camera.position.y = cameraPosition[1]
+      camera.position.z = cameraPosition[2]
+    }
+    
+  
+    camera.lookAt(wheel.position)
+  
   }
 }
 
@@ -54,6 +82,19 @@ function addRatWheel() {
 
           wheel = object;
         }
+
+        if (object.name == 'Sphere_1') {
+          rim_1 = object; 
+        }
+
+        if (object.name == 'Sphere_2') {
+          rim_2 = object; 
+        }
+
+        if (object.name == 'Sphere_3') {
+          rim_3 = object; 
+        }
+        
       }
     });
 
@@ -105,14 +146,14 @@ function rat() {
 }
 function spawnBall() {
 
-  if (objects.length > 300) return;
+  if (objects.length > 300) clearInterval(interval) 
 
   const ballGeometry = new THREE.SphereGeometry(.5, 32, 32);
-  const ballMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+  const ballMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
   const ballMesh = new THREE.Mesh(ballGeometry, ballMaterial);
   const x = Math.random() * 10 - 5;
   const z = Math.random() * 10 - 5;
-  const y = 3;
+  const y = 50;
 
   ballMesh.position.set(x, y, z);
   scene.add(ballMesh);
@@ -127,38 +168,46 @@ function spawnBall() {
 
 function makeBoardRandom() {
   const groundGeometry = new THREE.PlaneGeometry(20, 20);
-  const groundMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00, wireframe: true });
+  const groundMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00 });
   const groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
+  groundMesh.visible = false; 
   groundMesh.rotation.x = -Math.PI / 2;
   groundMesh.position.set(0, 0, 0);
   scene.add(groundMesh);
 
   // Add physics for the ground
-  const groundBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
-  world.createCollider(RAPIER.ColliderDesc.cuboid(10, 0.1, 10), groundBody);
+  const groundBodyDesc = RAPIER.RigidBodyDesc.fixed()
+  .setTranslation(0, -1/2, 0)
+  const groundBody = world.createRigidBody(groundBodyDesc);
+  world.createCollider(RAPIER.ColliderDesc.cuboid(10, 0.01, 10), groundBody)
 
   // Positions and colors for walls
   const positions = [];
-  for (let i = 0; i < 11; i++) {
-    positions.push({ x: Math.random() * 15 - 7.5, y: .2, z: Math.random() * 15 - 7.5 });
+  for (let i = 0; i < 50; i++) {
+    const angle = 2*Math.random() * Math.PI
+
+    positions.push({ 
+      x: (4*Math.random()+5)*Math.cos(angle), 
+      y: 15 * (Math.random() - 0.5), 
+      z: (4*Math.random()+5)*Math.sin(angle) });
   }
 
-  const colors = [0xff0000, 0x00ff00, 0x0000ff]; // Red, Green, Blue
+  const colors = [0xff0000]; // Red, Green, Blue
 
   positions.forEach((pos, index) => {
     // Randomly adjust angles
-    const angleY = Math.random() * Math.PI; // Random angle between 0 and π
-    const angleX = Math.random() * Math.PI; // Random angle between 0 and π
-    const angleZ = Math.random() * Math.PI; // Random angle between 0 and π
+    const angleY = (Math.random()) * Math.PI; // Random angle between 0 and π
+    const angleX = (Math.random()) * Math.PI; // Random angle between 0 and π
+    const angleZ =  (Math.random() - 1/2) * Math.PI / 4 + Math.PI / 2 // Random angle between 0 and π
 
     // Wall dimensions
     const wallThickness = 0.2;
-    const wallHeight = 3;
-    const wallLength = 20 + 2 * wallThickness;
+    const wallHeight = 2;
+    const wallLength = 17 * (Math.random()+0.5) + 2 * wallThickness;
 
     // Create wall geometry and material
     const wallGeometry = new THREE.BoxGeometry(wallLength, wallHeight, wallThickness);
-    const wallMaterial = new THREE.MeshBasicMaterial({ color: colors[index % colors.length], wireframe: true });
+    const wallMaterial = new THREE.MeshLambertMaterial({ color: colors[index % colors.length], transparent: true, opacity: Math.random() + 0.5 });
     const wallMesh = new THREE.Mesh(wallGeometry, wallMaterial);
 
     // Set wall position and rotation
@@ -187,27 +236,28 @@ import('@dimforge/rapier3d').then(rapeirModel => {
 
   rat();
   // Use the RAPIER module here.
-  let gravity = { x: 0.0, y: -9.81, z: 0.0 };
+  let gravity = { x: 0.0, y: -2, z: 0.0 };
   RAPIER = rapeirModel;
   world = new RAPIER.World(gravity);
   const integrationParameters = new RAPIER.IntegrationParameters();
 
-  console.log("world", world);
-
   makeBoardRandom();
   // Spawn a ball every second
-  setInterval(spawnBall, 1000);
+  interval = setInterval(spawnBall, 1000); 
 
 })
 
 
 function init() {
 
+  clock = new THREE.Clock(); 
+  
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x505050);
+  scene.background = new THREE.Color(0x000);
+  scene.add(new THREE.AxesHelper(1))
 
-  camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 50);
-  camera.position.set(0, 15, 25);
+  camera = new THREE.PerspectiveCamera(130, window.innerWidth / window.innerHeight, 0.1, 1000);
+  camera.position.set(0, 10, 10);
 
   room = new THREE.LineSegments(
     new BoxLineGeometry(6, 6, 6, 10, 10, 10),
@@ -237,11 +287,6 @@ function init() {
 
   controls.target.y = 1.6;
   controls.update();
-
-  document.body.appendChild(XRButton.createButton(renderer, {
-    'optionalFeatures': ['depth-sensing'],
-    'depthSensing': { 'usagePreference': ['gpu-optimized'], 'dataFormatPreference': [] }
-  }));
 
   // controllers
 
@@ -306,6 +351,10 @@ function init() {
 
   window.addEventListener('resize', onWindowResize);
 
+  setInterval(() => {
+    cameraPosition = cameraPositions[Math.floor(Math.random() * cameraPositions.length)]
+  }, 5000)
+  clock.start();
 }
 
 function buildController(data) {
@@ -364,11 +413,13 @@ function handleController(controller) {
 
 function animate() {
 
+  const elapsedTime = clock.getElapsedTime();
+
   handleController(controller1);
   handleController(controller2);
 
-  updatePhysics();
-  animateRatWheel();
+  updatePhysics(elapsedTime);
+  animateRatWheel(elapsedTime);
 
   renderer.render(scene, camera);
 
